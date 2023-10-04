@@ -1,5 +1,6 @@
 let s:blank_re = '^\s*$'
 let s:comment_re = '^\s*#'
+let s:section_comment_re = '^\s*#.*---'
 let s:multi_def_end_re = ')\%(\s*->\s*\S\+[^#]*\)\?:\s*\%(#.*\)\?$'
 let s:multi_def_end_solo_re = '^\s*)\%(\%(\s*->\)\?\s*\S\+[^#]*\)\?:\s*\%(#.*\)\?$'
 let s:docstring_re = '^\s*[bBfFrRuU]\{0,2}\\\@<!\(''''''\|"""\|[''"]\)'
@@ -186,12 +187,14 @@ function! s:cache() abort
     let docstring_start = -1
     let in_import = 0
     let was_import = 0
+    let in_section = 0
+    let section_ind = 0
     for lnum in range(1, lnum_last)
         let line = lines[lnum]
 
         " Multiline strings
         if in_string
-            let foldlevel = len(defs_stack)
+            let foldlevel = len(defs_stack) + in_section
             call add(cache, {'is_blank': 0, 'is_comment': 0, 'foldexpr': foldlevel})
 
             let string_match = s:multi_string(line, string_end_re, 1)
@@ -224,7 +227,8 @@ function! s:cache() abort
                 call add(cache, {'is_blank': 1, 'is_comment': 0, 'foldexpr': 0})
                 call s:blanks_adj(cache, lnum, 0)
             else
-                call add(cache, {'is_blank': 1, 'is_comment': 0, 'foldexpr': len(defs_stack)})
+                call add(cache, {'is_blank': 1, 'is_comment': 0,
+                      \          'foldexpr': len(defs_stack) + in_section})
             endif
             continue
         endif
@@ -234,17 +238,35 @@ function! s:cache() abort
         " Comments
         if line =~# s:comment_re
             call add(cache, {'is_blank': 0, 'is_comment': 1, 'indent': ind})
+            if line =~# s:section_comment_re
+              let cache[lnum]['is_comment'] = 0
+              let cache[lnum]['is_sec'] = 1
+              let in_section = 1
+              let section_ind = ind
+            endif
             let foldlevel = 0
-            let defs_stack_len = len(defs_stack)
+            let defs_stack_len = len(defs_stack) + in_section
             for idx in range(defs_stack_len)
                 if ind > cache[defs_stack[idx]]['indent']
                     let foldlevel = defs_stack_len - idx
                     break
                 endif
             endfor
-            let cache[lnum]['foldexpr'] = foldlevel
-            call s:blanks_adj(cache, lnum, foldlevel)
+
+            " Sections
+            if cache[lnum]['is_sec']
+                let cache[lnum-1]['foldexpr'] = '<' . foldlevel
+                let cache[lnum]['foldexpr'] = '>' . foldlevel
+            else
+                let cache[lnum]['foldexpr'] = foldlevel
+                call s:blanks_adj(cache, lnum, foldlevel)
+            endif
             continue
+        endif
+
+        if ind < section_ind
+          let in_section = 0
+          let section_ind = 0
         endif
 
         call add(cache, {'is_blank': 0, 'is_comment': 0,
@@ -261,7 +283,7 @@ function! s:cache() abort
             elseif ind < ind_def
                 let defs_stack = [lnum] + s:defs_stack_prune(cache, defs_stack, ind)
             endif
-            let foldlevel = len(defs_stack) - 1
+            let foldlevel = len(defs_stack) - 1 + in_section
             let ind_def = ind
             call s:blanks_adj(cache, lnum, foldlevel)
             let cache[lnum]['foldexpr'] = '>' . (foldlevel + 1)
@@ -282,7 +304,7 @@ function! s:cache() abort
                 endif
             endif
         endif
-        let foldlevel = len(defs_stack)
+        let foldlevel = len(defs_stack) + in_section
 
         " Multiline strings start
         let string_match = s:multi_string(line, s:string_start_re, 0)
