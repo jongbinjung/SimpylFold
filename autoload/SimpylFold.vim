@@ -244,11 +244,11 @@ function! s:cache() abort
               let in_section = 1
               let section_ind = ind
             endif
-            let foldlevel = 0
-            let defs_stack_len = len(defs_stack) + in_section
+            let foldlevel = in_section
+            let defs_stack_len = len(defs_stack)
             for idx in range(defs_stack_len)
                 if ind > cache[defs_stack[idx]]['indent']
-                    let foldlevel = defs_stack_len - idx
+                    let foldlevel = defs_stack_len - idx + in_section
                     break
                 endif
             endfor
@@ -294,7 +294,11 @@ function! s:cache() abort
         if !empty(defs_stack)
             if ind == ind_def
                 let defs_stack = defs_stack[1:]
-                let ind_def = cache[defs_stack[0]]['indent']
+                if !empty(defs_stack)
+                    let ind_def = cache[defs_stack[0]]['indent']
+                else
+                    let ind_def = -1
+                endif
             elseif ind < ind_def
                 let defs_stack = s:defs_stack_prune(cache, defs_stack, ind)
                 if !empty(defs_stack)
